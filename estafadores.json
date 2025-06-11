@@ -1,0 +1,31 @@
+[
+    {
+        "nombre": "Juan Perrz",
+        "cam4_users": [
+            "aprilofi",
+            "aprilofi222"
+        ],
+        "telegram_users": [
+            "lugoneta",
+            "lug9999oneta"
+        ]
+    },
+    {
+        "nombre": "Marcela Ivañez",
+        "cam4_users": [
+            "perrita"
+        ],
+        "telegram_users": [
+            "cachorra"
+        ]
+    },
+    {
+        "nombre": "Juan domingo",
+        "cam4_users": [
+            "aprilofi"
+        ],
+        "telegram_users": [
+            "lugoneta"
+        ]
+    }
+]
