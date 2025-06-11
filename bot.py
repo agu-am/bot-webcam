@@ -259,6 +259,7 @@ async def buscar_estafador(update: Update, context: ContextTypes.DEFAULT_TYPE) -
             response_text += f"**Nombre:** {nombre}\n"
             response_text += f"   **CAM4:** {cam4_users}\n"
             response_text += f"   **Telegram:** {telegram_users}\n\n"
+            # comentario
     else:
         response_text = f"No se encontraron estafadores que coincidan con '{query}' con un umbral de similitud de {threshold}% o más."
         response_text += "\n\nIntenta con una palabra clave diferente o un umbral más bajo si no obtienes resultados."
