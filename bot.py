@@ -1,6 +1,6 @@
 import logging
 import json
-from telegram import Update
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     Application,
     CommandHandler,
@@ -8,6 +8,7 @@ from telegram.ext import (
     filters,
     ContextTypes,
     ConversationHandler,
+    CallbackQueryHandler,
 )
 from fuzzywuzzy import fuzz
 from fuzzywuzzy import process
@@ -29,6 +30,10 @@ logger = logging.getLogger(__name__)
 
 ARCHIVO_ESTAFADORES = "estafadores.json"
 estafadores = []
+
+# Nuevo diccionario para almacenar reportes pendientes con sus datos completos
+# La clave será el message_id del mensaje enviado al canal
+pending_reports = {}
 
 
 def cargar_estafadores():
@@ -129,20 +134,13 @@ async def agregar_estafador(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         )
 
 
-## Función `listar_estafadores` actualizada
-
 async def listar_estafadores(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not estafadores:
         await update.message.reply_text("La lista de estafadores está vacía.")
         return
 
-    # Extraer y ordenar nombres completos únicos
     nombres_unicos = sorted(list(set(e.get("nombre", "Nombre Desconocido") for e in estafadores if e.get("nombre"))))
-    
-    # Extraer y ordenar usuarios de CAM4 únicos
     cam4_unicos = sorted(list(set(user for e in estafadores for user in e.get("cam4_users", []))))
-    
-    # Extraer y ordenar usuarios de Telegram únicos
     telegram_unicos = sorted(list(set(user for e in estafadores for user in e.get("telegram_users", []))))
 
     response_text = "--- Lista de Estafadores ---\n\n"
@@ -172,7 +170,7 @@ async def listar_estafadores(update: Update, context: ContextTypes.DEFAULT_TYPE)
         response_text += "**Usuarios Telegram:** (Ninguno registrado)\n\n"
 
     await update.message.reply_text(response_text, parse_mode='Markdown')
-# --- FUNCIÓN buscar_estafador CON BÚSQUEDA MÁS PRECISA POR PALABRAS ---
+
 async def buscar_estafador(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Busca un estafador por nombre, usuario de CAM4 o Telegram, con coincidencia aproximada, priorizando palabras."""
     if not context.args:
@@ -181,26 +179,18 @@ async def buscar_estafador(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         )
         return
 
-    query = " ".join(context.args).strip().lower()
-
+    query = " ".join(context.args).strip().lower() # La cadena de búsqueda del usuario
+    
     # Si la consulta es muy corta, es probable que no sea precisa
     if len(query) < 3:
         await update.message.reply_text(
             "Por favor, introduce al menos **3 caracteres** para una búsqueda más precisa."
         )
         return
-    
-    # Usar fuzz.token_sort_ratio para comparar las cadenas después de ordenar sus palabras.
-    # Esto es ideal para cuando el orden de las palabras no importa y se busca una coincidencia de "tokens".
+
     scorer_method = fuzz.token_sort_ratio 
-
-    # Umbral de similitud. Este valor se ajusta para determinar qué tan similar debe ser
-    # el resultado para ser considerado una coincidencia.
-    # Un valor de 60-70 suele ser un buen punto de partida para coincidencias aproximadas.
-    threshold = 60 # Ajusta según las pruebas.
-
-    # Límite de resultados a procesar de fuzzywuzzy
-    limit_results = 20 # Aumentado por si hay varias coincidencias relevantes
+    threshold = 60 
+    limit_results = 20
 
     all_searchable_strings = []
     estafador_by_string_index = [] 
@@ -286,8 +276,6 @@ async def buscar_estafador(update: Update, context: ContextTypes.DEFAULT_TYPE) -
 
     await update.message.reply_text(response_text, parse_mode='Markdown')
 
-# ... (resto del código del bot sin cambios) ...
-
 async def iniciar_reporte(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     await update.message.reply_text(
         "¡Perfecto! Para tu reporte, necesito algunos detalles. Por favor, envía el **usuario de CAM4 o link del perfil**:"
@@ -331,6 +319,8 @@ async def nombre_completo_reporte(update: Update, context: ContextTypes.DEFAULT_
     )
     return PEDIR_FOTO
 
+## Modificación en `manejar_foto_reporte`
+
 async def manejar_foto_reporte(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     user = update.effective_user
     report_data = context.user_data.get('report_data', {})
@@ -355,26 +345,147 @@ async def manejar_foto_reporte(update: Update, context: ContextTypes.DEFAULT_TYP
     descripcion += f"ID de Usuario: {user.id}"
 
     try:
-        await context.bot.send_photo(
+        sent_message = await context.bot.send_photo(
             chat_id=ID_CANAL_FOTOS,
             photo=photo_file_id,
             caption=descripcion,
             parse_mode='Markdown'
         )
+        
+        # Almacena los datos del reporte usando el message_id del mensaje enviado al canal
+        report_id = str(sent_message.message_id) # Convertir a string para usar como clave
+        pending_reports[report_id] = {
+            "nombre": nombre_estafador_reporte,
+            "cam4": cam4_user_reporte,
+            "telegram": telegram_user_reporte
+        }
+        logger.info(f"Reporte almacenado temporalmente con ID: {report_id}")
+
+        # Prepara los callback_data con el ID del reporte
+        callback_data_add = f"add_scammer_{report_id}" # Formato: acción_id_del_reporte
+        callback_data_delete = "delete_report_message" # No necesita ID, solo eliminar el mensaje
+
+        # Define la botonera
+        keyboard = [
+            [
+                InlineKeyboardButton("✅ Agregar a Estafadores", callback_data=callback_data_add),
+                InlineKeyboardButton("🗑️ Eliminar Mensaje", callback_data=callback_data_delete)
+            ]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+
+        # Edita el mensaje para añadir la botonera
+        await sent_message.edit_reply_markup(reply_markup=reply_markup)
+
         await update.message.reply_text(
-            "¡Gracias! Tu reporte ha sido enviado al canal para revisión."
+            "¡Gracias! Tu reporte ha sido enviado al canal para revisión y se han añadido botones para gestionarlo."
         )
     except Exception as e:
-        logger.error(f"Error al enviar la foto al canal: {e}")
+        logger.error(f"Error al enviar la foto al canal o añadir botonera: {e}")
         await update.message.reply_text(
-            "Hubo un error al enviar tu reporte al canal. Por favor, inténtalo de nuevo más tarde."
+            "Hubo un error al enviar tu reporte al canal o al añadir los botones. Por favor, inténtalo de nuevo más tarde."
         )
 
     if 'report_data' in context.user_data:
         del context.user_data['report_data']
     return ConversationHandler.END
 
+async def button_callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    await query.answer() # Siempre responde a la callback query
 
+    user_id = query.from_user.id
+    if user_id != ID_ADMIN:
+        await query.edit_message_text("¡No tienes permiso para realizar esta acción!")
+        return
+
+    callback_data = query.data
+    message_id_str = str(query.message.message_id) # Obtener el message_id del mensaje donde se presionó el botón
+
+    if callback_data == "delete_report_message":
+        try:
+            await query.message.delete()
+            # Opcional: limpiar de pending_reports si se elimina sin agregar
+            if message_id_str in pending_reports:
+                del pending_reports[message_id_str]
+                logger.info(f"Reporte con ID {message_id_str} eliminado de pending_reports.")
+            logger.info(f"Mensaje de reporte eliminado por el admin {user_id}.")
+        except Exception as e:
+            logger.error(f"Error al intentar eliminar el mensaje: {e}")
+            await query.edit_message_text("No se pudo eliminar el mensaje.")
+        return
+
+    # Si el callback_data empieza con "add_scammer_", procesar
+    if callback_data.startswith("add_scammer_"):
+        report_id = callback_data.replace("add_scammer_", "")
+        
+        if report_id not in pending_reports:
+            await query.edit_message_caption(
+                caption=f"{query.message.caption}\n\n⚠️ **Error:** Datos del reporte no encontrados. El reporte puede haber sido procesado o el bot se reinició.",
+                parse_mode='Markdown',
+                reply_markup=None
+            )
+            logger.warning(f"Intento de añadir estafador con ID {report_id} pero no se encontró en pending_reports.")
+            return
+
+        report_data = pending_reports[report_id]
+        nombre_completo_nuevo = report_data.get("nombre", "")
+        user_cam4_nuevo = report_data.get("cam4", "")
+        user_telegram_nuevo = report_data.get("telegram", "")
+
+        estafador_existente = None
+        for estafador in estafadores:
+            if estafador.get("nombre", "").lower() == nombre_completo_nuevo.lower():
+                estafador_existente = estafador
+                break
+
+        response_text = ""
+        if estafador_existente:
+            added_info = []
+            if "cam4_users" not in estafador_existente:
+                estafador_existente["cam4_users"] = []
+            if "telegram_users" not in estafador_existente:
+                estafador_existente["telegram_users"] = []
+
+            if user_cam4_nuevo and user_cam4_nuevo not in estafador_existente["cam4_users"]:
+                estafador_existente["cam4_users"].append(user_cam4_nuevo)
+                added_info.append(f"CAM4: {user_cam4_nuevo}")
+            if user_telegram_nuevo and user_telegram_nuevo not in estafador_existente["telegram_users"]:
+                estafador_existente["telegram_users"].append(user_telegram_nuevo)
+                added_info.append(f"Telegram: {user_telegram_nuevo}")
+
+            if added_info:
+                guardar_estafadores()
+                response_text = f"Estafador **'{nombre_completo_nuevo}'** ya existía. Se añadió:\n- " + "\n- ".join(added_info)
+            else:
+                response_text = f"El estafador **'{nombre_completo_nuevo}'** ya existe y los usuarios proporcionados ya estaban registrados."
+        else:
+            nuevo_estafador = {
+                "nombre": nombre_completo_nuevo,
+                "cam4_users": [user_cam4_nuevo] if user_cam4_nuevo else [],
+                "telegram_users": [user_telegram_nuevo] if user_telegram_nuevo else []
+            }
+            estafadores.append(nuevo_estafador)
+            guardar_estafadores()
+            response_text = f"Nuevo estafador **'{nombre_completo_nuevo}'** agregado a la lista con CAM4: {user_cam4_nuevo}, Telegram: {user_telegram_nuevo}."
+        
+        # Eliminar el reporte de la lista temporal después de procesarlo
+        if report_id in pending_reports:
+            del pending_reports[report_id]
+            logger.info(f"Reporte con ID {report_id} procesado y eliminado de pending_reports.")
+
+        # Edita el mensaje original para indicar que se añadió a la lista
+        original_caption = query.message.caption if query.message.caption else ""
+        await query.edit_message_caption(
+            caption=f"{original_caption}\n\n✔️ {response_text}",
+            parse_mode='Markdown',
+            reply_markup=None # Quitar la botonera después de la acción para evitar reprocesar
+        )
+        logger.info(f"Reporte de estafador procesado: {nombre_completo_nuevo}.")
+
+    else:
+        logger.warning(f"Callback data desconocida: {callback_data}")
+        await query.edit_message_text("Acción de botón desconocida.")
 async def cancelar_reporte(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     if 'report_data' in context.user_data:
         del context.user_data['report_data']
@@ -411,6 +522,9 @@ def main() -> None:
         fallbacks=[CommandHandler("cancelar", cancelar_reporte)],
     )
     application.add_handler(conv_handler_reporte)
+
+    # Añade este manejador para los botones inline
+    application.add_handler(CallbackQueryHandler(button_callback_handler))
 
     application.add_error_handler(manejar_error)
     application.run_polling(allowed_updates=Update.ALL_TYPES)
