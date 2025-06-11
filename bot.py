@@ -129,25 +129,49 @@ async def agregar_estafador(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         )
 
 
+## Función `listar_estafadores` actualizada
+
 async def listar_estafadores(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not estafadores:
         await update.message.reply_text("La lista de estafadores está vacía.")
         return
 
-    texto_lista_estafadores = "Lista de Estafadores:\n\n"
-    for i, estafador in enumerate(estafadores, 1):
-        nombre = estafador.get("nombre", "Nombre Desconocido")
-        cam4_users = ", ".join(estafador.get("cam4_users", [])) if estafador.get("cam4_users") else "N/A"
-        telegram_users = ", ".join(estafador.get("telegram_users", [])) if estafador.get("telegram_users") else "N/A"
+    # Extraer y ordenar nombres completos únicos
+    nombres_unicos = sorted(list(set(e.get("nombre", "Nombre Desconocido") for e in estafadores if e.get("nombre"))))
+    
+    # Extraer y ordenar usuarios de CAM4 únicos
+    cam4_unicos = sorted(list(set(user for e in estafadores for user in e.get("cam4_users", []))))
+    
+    # Extraer y ordenar usuarios de Telegram únicos
+    telegram_unicos = sorted(list(set(user for e in estafadores for user in e.get("telegram_users", []))))
 
-        texto_lista_estafadores += f"{i}. **Nombre:** {nombre}\n"
-        texto_lista_estafadores += f"   **CAM4:** {cam4_users}\n"
-        texto_lista_estafadores += f"   **Telegram:** {telegram_users}\n\n"
+    response_text = "--- Lista de Estafadores ---\n\n"
 
-    await update.message.reply_text(texto_lista_estafadores, parse_mode='Markdown')
+    if nombres_unicos:
+        response_text += "**Nombres Completos:**\n"
+        for i, nombre in enumerate(nombres_unicos, 1):
+            response_text += f"{i}. {nombre}\n"
+        response_text += "\n"
+    else:
+        response_text += "**Nombres Completos:** (Ninguno registrado)\n\n"
 
-# ... (todo el código anterior, sin cambios hasta la función buscar_estafador) ...
+    if cam4_unicos:
+        response_text += "**Usuarios CAM4:**\n"
+        for i, user in enumerate(cam4_unicos, 1):
+            response_text += f"{i}. {user}\n"
+        response_text += "\n"
+    else:
+        response_text += "**Usuarios CAM4:** (Ninguno registrado)\n\n"
 
+    if telegram_unicos:
+        response_text += "**Usuarios Telegram:**\n"
+        for i, user in enumerate(telegram_unicos, 1):
+            response_text += f"{i}. {user}\n"
+        response_text += "\n"
+    else:
+        response_text += "**Usuarios Telegram:** (Ninguno registrado)\n\n"
+
+    await update.message.reply_text(response_text, parse_mode='Markdown')
 # --- FUNCIÓN buscar_estafador CON BÚSQUEDA MÁS PRECISA POR PALABRAS ---
 async def buscar_estafador(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Busca un estafador por nombre, usuario de CAM4 o Telegram, con coincidencia aproximada, priorizando palabras."""
@@ -157,29 +181,26 @@ async def buscar_estafador(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         )
         return
 
-    query = " ".join(context.args).strip().lower() # La cadena de búsqueda del usuario
+    query = " ".join(context.args).strip().lower()
+
+    # Si la consulta es muy corta, es probable que no sea precisa
+    if len(query) < 3:
+        await update.message.reply_text(
+            "Por favor, introduce al menos **3 caracteres** para una búsqueda más precisa."
+        )
+        return
     
-    # --- AJUSTES DE SIMILITUD PARA MEJOR COINCIDENCIA POR PALABRA/TOKEN ---
-    # Opción 1: fuzz.token_sort_ratio (recomendado para este caso)
-    # Compara la cadena de búsqueda y las opciones después de ordenar alfabéticamente sus palabras (tokens).
-    # Es bueno para cuando el orden de las palabras no importa, y es menos permisivo que partial_ratio.
+    # Usar fuzz.token_sort_ratio para comparar las cadenas después de ordenar sus palabras.
+    # Esto es ideal para cuando el orden de las palabras no importa y se busca una coincidencia de "tokens".
     scorer_method = fuzz.token_sort_ratio 
 
-    # Opción 2: fuzz.partial_ratio con un umbral más alto (si la anterior no es suficiente)
-    # Este sigue siendo bueno para substrings, pero un umbral más alto lo hace más estricto.
-    # scorer_method = fuzz.partial_ratio
-
-    # Opción 3: fuzz.ratio (más estricto, ideal para coincidencias casi exactas)
-    # scorer_method = fuzz.ratio
-
-    # Umbral de similitud.
-    # Ajusta este valor (entre 0 y 100) hasta encontrar el balance deseado.
-    # Para 3 caracteres en una palabra, 40-60 podría ser un buen punto de partida.
-    # Si "jua" en "juanita" (6-7 letras) es un 50% de match, un 40-50 puede ser bueno.
-    threshold = 50 # Ajusta según prueba y error.
+    # Umbral de similitud. Este valor se ajusta para determinar qué tan similar debe ser
+    # el resultado para ser considerado una coincidencia.
+    # Un valor de 60-70 suele ser un buen punto de partida para coincidencias aproximadas.
+    threshold = 60 # Ajusta según las pruebas.
 
     # Límite de resultados a procesar de fuzzywuzzy
-    limit_results = 15 # Aumentado por si hay varias coincidencias relevantes
+    limit_results = 20 # Aumentado por si hay varias coincidencias relevantes
 
     all_searchable_strings = []
     estafador_by_string_index = [] 
@@ -257,9 +278,8 @@ async def buscar_estafador(update: Update, context: ContextTypes.DEFAULT_TYPE) -
             telegram_users = ", ".join(estafador_info.get("telegram_users", [])) if estafador_info.get("telegram_users") else "N/A"
 
             response_text += f"**Nombre:** {nombre}\n"
-            response_text += f"   **CAM4:** {cam4_users}\n"
-            response_text += f"   **Telegram:** {telegram_users}\n\n"
-            # comentario
+            response_text += f"  **CAM4:** {cam4_users}\n"
+            response_text += f"  **Telegram:** {telegram_users}\n\n"
     else:
         response_text = f"No se encontraron estafadores que coincidan con '{query}' con un umbral de similitud de {threshold}% o más."
         response_text += "\n\nIntenta con una palabra clave diferente o un umbral más bajo si no obtienes resultados."
