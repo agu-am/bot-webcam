@@ -598,13 +598,13 @@ def main() -> None:
 
     # Comandos generales
     application.add_handler(CommandHandler("start", start))
-    application.add_handler(CommandHandler("agregar_estafador", agregar_estafador))
-    application.add_handler(CommandHandler("listar_estafadores", listar_estafadores))
-    application.add_handler(CommandHandler("buscar_estafador", buscar_estafador))
+    application.add_handler(CommandHandler("add", agregar_estafador))
+    application.add_handler(CommandHandler("list", listar_estafadores))
+    application.add_handler(CommandHandler("s", buscar_estafador))
 
     # Conversación para enviar reportes
     conv_handler_reporte = ConversationHandler(
-        entry_points=[CommandHandler("enviar_reporte", iniciar_reporte)],
+        entry_points=[CommandHandler("r", iniciar_reporte)],
         states={
             PEDIR_TEXTO_1: [MessageHandler(filters.TEXT & ~filters.COMMAND, user_cam4_reporte)],
             PEDIR_TEXTO_2: [MessageHandler(filters.TEXT & ~filters.COMMAND, user_telegram_reporte)],
